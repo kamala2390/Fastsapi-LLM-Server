@@ -3,3 +3,6 @@ uvicorn[standard]
 pydantic
 llama-cpp-python
 requests
+transformers
+torch
+pillow
