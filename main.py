@@ -75,7 +75,7 @@ class PromptRequest(BaseModel):
     runtime: str = "llama-cpp-python"
     # Supported models: tinyllama | moondream2 | qwen2.5-vl
     model: str = "tinyllama"
-    # Base64-encoded image for VLMs (optional)
+    # Base64-encoded image for VLMs
     image: Optional[str] = None
     max_tokens: int = 100
 

@@ -3,6 +3,8 @@ uvicorn[standard]
 pydantic
 llama-cpp-python
 requests
-transformers
+transformers==4.47.0
 torch
 pillow
+einops
+pyvips
