@@ -94,10 +94,15 @@ def generate(request: PromptRequest):
     """
     Unified generation endpoint.
 
-    - runtime: "llama-cpp-python" | "mlc-llm" | "vllm"
+    - runtime: "llama-cpp-python" | "mlc-llm" | "vllm" (ignored when `image`
+      is set — only the huggingface/generate_hf path actually understands
+      images, so VLM requests are routed there automatically)
     - model:   "tinyllama" | "moondream2" | "qwen2.5-vl"
-    - image:   base64-encoded image (optional, for VLMs via /generate_hf)
+    - image:   base64-encoded image (optional, for VLMs)
     """
+    if request.image:
+        return generate_hf(request)
+
     runtime = request.runtime.lower()
 
     if runtime == "llama-cpp-python":
@@ -298,8 +303,17 @@ def generate_mlc(request: PromptRequest):
 
 @app.post("/generate_moondream")
 def generate_moondream(request: PromptRequest):
-    """Alias for /generate with model=moondream2, runtime=llama-cpp-python."""
+    """
+    Alias for /generate with model=moondream2.
+
+    If an image is provided, routes to the huggingface/generate_hf path
+    (the llama-cpp GGUF text model can't process images and would otherwise
+    silently ignore it). Without an image, runs the legacy text-only
+    llama-cpp-python model.
+    """
     request.model = "moondream2"
+    if request.image:
+        return generate_hf(request)
     request.runtime = "llama-cpp-python"
     return _run_llama_cpp(request)
 
