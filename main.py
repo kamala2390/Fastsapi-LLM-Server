@@ -55,6 +55,7 @@ def get_hf_moondream():
     """Load moondream2 from HuggingFace via the transformers library."""
     global _hf_moondream_model, _hf_moondream_tokenizer
     if _hf_moondream_model is None:
+        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         revision = "2025-01-09"
         _hf_moondream_tokenizer = AutoTokenizer.from_pretrained(
@@ -63,6 +64,11 @@ def get_hf_moondream():
         _hf_moondream_model = AutoModelForCausalLM.from_pretrained(
             "vikhyatk/moondream2", revision=revision, trust_remote_code=True
         )
+        # moondream2's remote code assumes the model lives on MPS whenever MPS
+        # is available (see its vision.py adaptive_avg_pool2d patch), so on
+        # Apple Silicon it must actually be moved there or ops mismatch devices.
+        if torch.backends.mps.is_available():
+            _hf_moondream_model = _hf_moondream_model.to("mps")
     return _hf_moondream_model, _hf_moondream_tokenizer
 
 
