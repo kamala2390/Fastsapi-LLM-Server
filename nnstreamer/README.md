@@ -73,19 +73,58 @@ Notes on the pipeline:
 - The caption comes out as a 1024-byte UTF-8 tensor and is also printed to
   stdout.
 
-## What was actually tested, and what wasn't
+## What was tested
 
-**This Mac has no GStreamer or NNStreamer installed, and NNStreamer has no
-official macOS package** (it officially targets Ubuntu, Tizen, Android, and
-Yocto — confirmed via `brew search`, which has no `nnstreamer` formula). So
-the literal `gst-launch-1.0` pipeline above has not been run here, and won't
-run on this machine without an unofficial from-source build.
+### 1. Real NNStreamer pipeline (Ubuntu container -> server on the Mac)
 
-What *was* tested is the part that was actually uncertain: **whether the
-FastAPI server correctly does image VLM inference given a JPEG frame**,
-i.e. exactly what `fastapi_query_filter.invoke()` does on every frame. That
-was run standalone via `query_client.py` against the live server on this
-machine, using a synthetic 640x480 test frame in `sample_frames/`:
+NNStreamer has no official macOS package (it targets Ubuntu, Tizen, Android
+and Yocto), so the pipeline was run in an Ubuntu 22.04 container with the
+official NNStreamer 2.7 packages ([`Dockerfile`](Dockerfile)), talking to the
+FastAPI server running natively on the Mac. A still test image stands in for
+the camera (`filesrc ... ! imagefreeze`), since no phone camera is attached;
+everything from `tensor_converter` on is the same as the phone pipeline:
+
+```
+$ docker build -t nns-test nnstreamer
+$ docker run --rm -v "$PWD/nnstreamer:/work" nns-test \
+    gst-launch-1.0 -q \
+      filesrc location=sample_frames/test_frame.jpg ! jpegdec ! videoconvert ! videoscale ! imagefreeze num-buffers=2 ! \
+      video/x-raw,width=640,height=480,format=RGB,framerate=1/5 ! \
+      tensor_converter ! \
+      tensor_filter framework=python3 model=/work/fastapi_query_filter.py \
+        custom=server_url:http://host.docker.internal:8000/generate_hf,prompt:"Describe this image in one sentence." ! \
+      tensor_sink
+
+[fastapi_query_filter] A yellow circle with a brown triangle sits atop a green square, creating a balanced composition against a light blue background.
+[fastapi_query_filter] A yellow circle with a brown triangle sits atop a green square, creating a balanced composition against a light blue background.
+```
+
+Both frames were captioned correctly and the pipeline exited with status 0
+(server log: two `POST /generate_hf 200 OK`). NNStreamer prints a harmless
+`Given input info is invalid, cannot get output info` warning during caps
+negotiation before the frames flow.
+
+Things learned from running it in real NNStreamer (2.7):
+- Declaring fixed shapes with `getInputDim`/`getOutputDim` made `invoke()`
+  receive an empty input list, so the filter uses `setInputDim` instead.
+  Each frame arrives as one flat 921600-byte (640x480x3) uint8 array.
+- NNStreamer splits the `custom=` string on spaces, so the filter re-joins
+  it before parsing `key:value` pairs.
+
+The same pipeline was also run against the server inside its Docker
+container (`http://host.docker.internal:8001/generate_hf`) and returned
+"The image contains a square, a circle, and a triangle." Docker on a Mac has
+no GPU access, so moondream2 runs on CPU there: ~47 s per frame, vs ~6 s when
+the server runs natively on Apple Silicon (MPS).
+
+Not tested yet: an actual phone camera (`v4l2src` / Android camera source)
+over Wi-Fi.
+
+### 2. Server round trip via the standalone client
+
+`query_client.py` sends the test frame through the same bridge code against
+the live server on the Mac, using a synthetic 640x480 test frame in
+`sample_frames/`:
 
 ```
 $ python3 query_client.py sample_frames/test_frame.jpg "What do you see in this image?"
@@ -119,16 +158,6 @@ image-in/text-out round trip works.)
 The first call is slower because it's also the model's first invocation
 (weight materialization); subsequent calls only pay inference cost.
 
-The filter's own per-frame logic (raw RGB frame -> JPEG -> POST -> caption
-tensor) was also run outside NNStreamer, with a stand-in for the
-`nnstreamer_python` module and the test frame fed in as a 640x480 RGB array:
-
-```
-in dims [3, 640, 480, 1] out dims [1024]
-[fastapi_query_filter] Circle, Square, Triangle
-out shape (1024,) uint8
-```
-
 ## Bug found and fixed while testing
 
 Getting even the server round-trip working surfaced a real, pre-existing bug:
@@ -155,7 +184,8 @@ cd nnstreamer
 python3 query_client.py sample_frames/test_frame.jpg "What do you see?"
 ```
 
-To run the *actual* NNStreamer pipeline, do the above on a Linux box (or
-Android/Tizen device) with NNStreamer + its Python3 tensor_filter support
-installed, point `v4l2src` at the phone's/device's camera, and set
-`server_url` to the laptop's LAN IP.
+To run the NNStreamer pipeline on a Mac, use the Ubuntu container in
+section 1. On a Linux box (or Android/Tizen device) with NNStreamer + its
+Python3 tensor_filter support installed, use the phone pipeline above with
+`v4l2src` pointed at the device's camera and `server_url` set to the laptop's
+LAN IP.

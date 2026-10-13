@@ -16,7 +16,7 @@ DEFAULT_PROMPT = "Describe what you see in this image in one sentence."
 
 
 def query_vlm_server(image_bytes: bytes, prompt: str = DEFAULT_PROMPT,
-                      server_url: str = DEFAULT_SERVER_URL, timeout: float = 60.0) -> dict:
+                      server_url: str = DEFAULT_SERVER_URL, timeout: float = 120.0) -> dict:
     """Send one JPEG/PNG frame to the FastAPI moondream2 endpoint and return its JSON reply.
 
     Mirrors exactly what an NNStreamer pipeline's appsink/tensor_filter callback

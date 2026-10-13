@@ -69,11 +69,13 @@ class CustomFilter:
         self.server_url = options.get("server_url", DEFAULT_SERVER_URL)
         self.prompt = options.get("prompt", DEFAULT_PROMPT)
 
-    def getInputDim(self):
+    def setInputDim(self, input_dims):
+        # Called by NNStreamer with the negotiated input; getInputDim/getOutputDim
+        # leave invoke()'s input list empty on NNStreamer 2.7.
         # tensor_converter output for 640x480 RGB video: dims are channel:width:height:batch.
-        return [nns.TensorShape([3, WIDTH, HEIGHT, 1], np.uint8)]
-
-    def getOutputDim(self):
+        dims = input_dims[0].getDims()[:3]
+        if dims != [3, WIDTH, HEIGHT]:
+            raise ValueError(f"expected 3:{WIDTH}:{HEIGHT} RGB frames, got {dims}")
         # Server's text response, UTF-8 bytes, fixed-size buffer.
         return [nns.TensorShape([OUTPUT_BYTES], np.uint8)]
 
