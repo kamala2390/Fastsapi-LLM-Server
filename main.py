@@ -101,6 +101,12 @@ def generate(request: PromptRequest):
     - image:   base64-encoded image (optional, for VLMs)
     """
     if request.image:
+        if request.model.lower() not in ("moondream2", "qwen2.5-vl"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{request.model}' does not accept images. "
+                       "Use model=moondream2 for image requests.",
+            )
         return generate_hf(request)
 
     runtime = request.runtime.lower()
@@ -233,8 +239,7 @@ def generate_hf(request: PromptRequest):
     Run VLMs directly via HuggingFace transformers.
 
     Supported models:
-      - moondream2  (vikhyatk/moondream2): pass image (base64) for visual Q&A,
-                    or omit image for text-only generation.
+      - moondream2  (vikhyatk/moondream2): requires image (base64) for visual Q&A.
       - qwen2.5-vl  (Qwen/Qwen2.5-VL-7B-Instruct): not available locally
                     (~16 GB VRAM required).
     """
@@ -242,19 +247,22 @@ def generate_hf(request: PromptRequest):
     start = time.time()
 
     if model == "moondream2":
+        # moondream2's HF generate() always requires image embeddings, so
+        # text-only prompts aren't supported on this path.
+        if not request.image:
+            raise HTTPException(
+                status_code=400,
+                detail="moondream2 via /generate_hf requires an image. For text-only "
+                       "prompts use /generate with runtime=llama-cpp-python.",
+            )
         try:
             hf_model, tokenizer = get_hf_moondream()
 
-            if request.image:
-                from PIL import Image
-                image_bytes = base64.b64decode(request.image)
-                image = Image.open(BytesIO(image_bytes)).convert("RGB")
-                enc_image = hf_model.encode_image(image)
-                text = hf_model.answer_question(enc_image, request.prompt, tokenizer)
-            else:
-                inputs = tokenizer(request.prompt, return_tensors="pt")
-                output_ids = hf_model.generate(**inputs, max_new_tokens=request.max_tokens)
-                text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            from PIL import Image
+            image_bytes = base64.b64decode(request.image)
+            image = Image.open(BytesIO(image_bytes)).convert("RGB")
+            enc_image = hf_model.encode_image(image)
+            text = hf_model.answer_question(enc_image, request.prompt, tokenizer)
 
         except ImportError as e:
             raise HTTPException(

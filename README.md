@@ -14,10 +14,10 @@ A Dockerized FastAPI server integrating multiple LLM runtimes and VLMs on Apple 
 
 | Endpoint | Description |
 |---|---|
-| `POST /generate` | Unified endpoint — specify `runtime` and `model` |
+| `POST /generate` | Unified endpoint — specify `runtime` and `model`. Requests with an `image` are routed to moondream2 via HuggingFace automatically (`runtime` is ignored) |
 | `POST /generate_hf` | moondream2 via HuggingFace (requires base64 image) |
 | `POST /generate_mlc` | MLC-LLM (legacy alias) |
-| `POST /generate_moondream` | moondream2 via llama-cpp (legacy alias) |
+| `POST /generate_moondream` | moondream2 via llama-cpp, text only (legacy alias); with an `image` it routes to `/generate_hf` |
 | `POST /generate_qwen` | Qwen2.5-VL stub |
 | `GET /health` | Health check |
 
@@ -56,3 +56,7 @@ Swagger UI at `http://localhost:8001/docs`
 | MLC-LLM (Metal) | 0.861s | 0.866s | 0.968s |
 
 MLC-LLM was ~19% faster than llama-cpp in this configuration.
+
+## NNStreamer mobile bridge
+
+See [nnstreamer/README.md](nnstreamer/README.md) for an NNStreamer `tensor_filter` plugin that sends phone camera frames to `/generate_hf` and returns moondream2 captions.

@@ -55,13 +55,23 @@ NNStreamer installed):
 
 ```bash
 gst-launch-1.0 \
-  v4l2src ! videoconvert ! videoscale ! \
-  video/x-raw,width=640,height=480,format=RGB ! jpegenc ! \
+  v4l2src ! videoconvert ! videoscale ! videorate ! \
+  video/x-raw,width=640,height=480,format=RGB,framerate=1/5 ! \
   tensor_converter ! \
   tensor_filter framework=python3 model=fastapi_query_filter.py \
     custom=server_url:http://<laptop-ip>:8000/generate_hf,prompt:"What do you see?" ! \
   tensor_sink
 ```
+
+Notes on the pipeline:
+- `tensor_converter` doesn't accept JPEG, so raw 640x480 RGB frames
+  (tensor dims `3:640:480:1`) go into the filter, and the filter
+  JPEG-encodes each frame before POSTing it.
+- Each server call takes ~5-16 s, so `videorate ... framerate=1/5` limits the
+  camera to one frame every 5 seconds instead of ~30 fps, which would stall
+  the pipeline.
+- The caption comes out as a 1024-byte UTF-8 tensor and is also printed to
+  stdout.
 
 ## What was actually tested, and what wasn't
 
@@ -108,6 +118,16 @@ image-in/text-out round trip works.)
 
 The first call is slower because it's also the model's first invocation
 (weight materialization); subsequent calls only pay inference cost.
+
+The filter's own per-frame logic (raw RGB frame -> JPEG -> POST -> caption
+tensor) was also run outside NNStreamer, with a stand-in for the
+`nnstreamer_python` module and the test frame fed in as a 640x480 RGB array:
+
+```
+in dims [3, 640, 480, 1] out dims [1024]
+[fastapi_query_filter] Circle, Square, Triangle
+out shape (1024,) uint8
+```
 
 ## Bug found and fixed while testing
 
