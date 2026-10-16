@@ -2,6 +2,8 @@
 
 A Dockerized FastAPI server integrating multiple LLM runtimes and VLMs on Apple Silicon.
 
+For step-by-step setup and testing (Docker, every runtime, the VLM and the NNStreamer pipeline), see [GUIDE.md](GUIDE.md).
+
 ## What I Built
 
 - Connected **llama-cpp-python** and **MLC-LLM** backends to a FastAPI server

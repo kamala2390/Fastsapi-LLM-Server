@@ -88,7 +88,7 @@ everything from `tensor_converter` on is the same as the phone pipeline:
 $ docker build -t nns-test nnstreamer
 $ docker run --rm -v "$PWD/nnstreamer:/work" nns-test \
     gst-launch-1.0 -q \
-      filesrc location=sample_frames/test_frame.jpg ! jpegdec ! videoconvert ! videoscale ! imagefreeze num-buffers=2 ! \
+      filesrc location=sample_frames/test_frame.jpg ! decodebin ! videoconvert ! videoscale ! imagefreeze num-buffers=2 ! \
       video/x-raw,width=640,height=480,format=RGB,framerate=1/5 ! \
       tensor_converter ! \
       tensor_filter framework=python3 model=/work/fastapi_query_filter.py \
@@ -98,6 +98,9 @@ $ docker run --rm -v "$PWD/nnstreamer:/work" nns-test \
 [fastapi_query_filter] A yellow circle with a brown triangle sits atop a green square, creating a balanced composition against a light blue background.
 [fastapi_query_filter] A yellow circle with a brown triangle sits atop a green square, creating a balanced composition against a light blue background.
 ```
+
+`decodebin` is used rather than `jpegdec`, since `jpegdec` alone fails on
+progressive JPEGs (most camera and web photos) with "No valid frames decoded".
 
 Both frames were captioned correctly and the pipeline exited with status 0
 (server log: two `POST /generate_hf 200 OK`). NNStreamer prints a harmless
