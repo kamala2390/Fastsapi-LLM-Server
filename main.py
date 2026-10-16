@@ -55,6 +55,7 @@ def get_hf_moondream():
     """Load moondream2 from HuggingFace via the transformers library."""
     global _hf_moondream_model, _hf_moondream_tokenizer
     if _hf_moondream_model is None:
+        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         revision = "2025-01-09"
         _hf_moondream_tokenizer = AutoTokenizer.from_pretrained(
@@ -63,6 +64,11 @@ def get_hf_moondream():
         _hf_moondream_model = AutoModelForCausalLM.from_pretrained(
             "vikhyatk/moondream2", revision=revision, trust_remote_code=True
         )
+        # moondream2's remote code assumes the model lives on MPS whenever MPS
+        # is available (see its vision.py adaptive_avg_pool2d patch), so on
+        # Apple Silicon it must actually be moved there or ops mismatch devices.
+        if torch.backends.mps.is_available():
+            _hf_moondream_model = _hf_moondream_model.to("mps")
     return _hf_moondream_model, _hf_moondream_tokenizer
 
 
@@ -88,10 +94,21 @@ def generate(request: PromptRequest):
     """
     Unified generation endpoint.
 
-    - runtime: "llama-cpp-python" | "mlc-llm" | "vllm"
+    - runtime: "llama-cpp-python" | "mlc-llm" | "vllm" (ignored when `image`
+      is set — only the huggingface/generate_hf path actually understands
+      images, so VLM requests are routed there automatically)
     - model:   "tinyllama" | "moondream2" | "qwen2.5-vl"
-    - image:   base64-encoded image (optional, for VLMs via /generate_hf)
+    - image:   base64-encoded image (optional, for VLMs)
     """
+    if request.image:
+        if request.model.lower() not in ("moondream2", "qwen2.5-vl"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{request.model}' does not accept images. "
+                       "Use model=moondream2 for image requests.",
+            )
+        return generate_hf(request)
+
     runtime = request.runtime.lower()
 
     if runtime == "llama-cpp-python":
@@ -222,8 +239,7 @@ def generate_hf(request: PromptRequest):
     Run VLMs directly via HuggingFace transformers.
 
     Supported models:
-      - moondream2  (vikhyatk/moondream2): pass image (base64) for visual Q&A,
-                    or omit image for text-only generation.
+      - moondream2  (vikhyatk/moondream2): requires image (base64) for visual Q&A.
       - qwen2.5-vl  (Qwen/Qwen2.5-VL-7B-Instruct): not available locally
                     (~16 GB VRAM required).
     """
@@ -231,19 +247,22 @@ def generate_hf(request: PromptRequest):
     start = time.time()
 
     if model == "moondream2":
+        # moondream2's HF generate() always requires image embeddings, so
+        # text-only prompts aren't supported on this path.
+        if not request.image:
+            raise HTTPException(
+                status_code=400,
+                detail="moondream2 via /generate_hf requires an image. For text-only "
+                       "prompts use /generate with runtime=llama-cpp-python.",
+            )
         try:
             hf_model, tokenizer = get_hf_moondream()
 
-            if request.image:
-                from PIL import Image
-                image_bytes = base64.b64decode(request.image)
-                image = Image.open(BytesIO(image_bytes)).convert("RGB")
-                enc_image = hf_model.encode_image(image)
-                text = hf_model.answer_question(enc_image, request.prompt, tokenizer)
-            else:
-                inputs = tokenizer(request.prompt, return_tensors="pt")
-                output_ids = hf_model.generate(**inputs, max_new_tokens=request.max_tokens)
-                text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            from PIL import Image
+            image_bytes = base64.b64decode(request.image)
+            image = Image.open(BytesIO(image_bytes)).convert("RGB")
+            enc_image = hf_model.encode_image(image)
+            text = hf_model.answer_question(enc_image, request.prompt, tokenizer)
 
         except ImportError as e:
             raise HTTPException(
@@ -292,8 +311,17 @@ def generate_mlc(request: PromptRequest):
 
 @app.post("/generate_moondream")
 def generate_moondream(request: PromptRequest):
-    """Alias for /generate with model=moondream2, runtime=llama-cpp-python."""
+    """
+    Alias for /generate with model=moondream2.
+
+    If an image is provided, routes to the huggingface/generate_hf path
+    (the llama-cpp GGUF text model can't process images and would otherwise
+    silently ignore it). Without an image, runs the legacy text-only
+    llama-cpp-python model.
+    """
     request.model = "moondream2"
+    if request.image:
+        return generate_hf(request)
     request.runtime = "llama-cpp-python"
     return _run_llama_cpp(request)
 
